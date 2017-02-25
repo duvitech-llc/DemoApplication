@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -24,6 +25,9 @@ import java.lang.ref.WeakReference;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "MainActivity";
+    static String exampleText = "Lorem Ipsum is simply dummy text of the printing and typesettin";
 
     /*
      * Notifications from UsbService will be received here.
@@ -82,8 +86,10 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 if (!editText.getText().toString().equals("")) {
                     String data = editText.getText().toString();
-                    if (usbService != null) { // if UsbService was correctly binded, Send data
-                        usbService.write(data.getBytes());
+                    for(int x = 0; x < 64; x++){
+                        if (usbService != null) { // if UsbService was correctly binded, Send data
+                            usbService.write(exampleText.getBytes());
+                        }
                     }
                 }
             }
