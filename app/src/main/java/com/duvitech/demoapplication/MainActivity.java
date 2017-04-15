@@ -86,10 +86,17 @@ public class MainActivity extends AppCompatActivity {
             public void onClick(View v) {
                 if (!editText.getText().toString().equals("")) {
                     String data = editText.getText().toString();
+
+                    /*
                     for(int x = 0; x < 64; x++){
                         if (usbService != null) { // if UsbService was correctly binded, Send data
                             usbService.write(exampleText.getBytes());
                         }
+                    }
+                    */
+
+                    if (usbService != null) { // if UsbService was correctly binded, Send data
+                        usbService.write(data.getBytes());
                     }
                 }
             }
