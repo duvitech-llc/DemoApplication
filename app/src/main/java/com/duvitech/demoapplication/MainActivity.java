@@ -1,33 +1,58 @@
 package com.duvitech.demoapplication;
 
 
+import android.Manifest;
+import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
+import android.provider.MediaStore;
+import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import android.widget.EditText;
-import android.widget.TextView;
+import android.widget.ImageView;
 import android.widget.Toast;
 
 import com.duvitech.hud.UsbService;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.lang.ref.WeakReference;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.util.Set;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     static String exampleText = "Lorem Ipsum is simply dummy text of the printing and typesettin";
+
+    private static final int DisplayWidth = 800;
+    private static final int DisplayHeight = 480;
+    private final static Lock qUSBSenderLock = new ReentrantLock();
+
+    private static final int RESULT_SEND_FRAME_BUFFER = 1;
+    private static final int REQUEST_EXTERNAL_STORAGE = 1;
+    private static String[] PERMISSIONS_STORAGE = {
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+    };
 
     /*
      * Notifications from UsbService will be received here.
@@ -55,8 +80,7 @@ public class MainActivity extends AppCompatActivity {
         }
     };
     private UsbService usbService;
-    private TextView display;
-    private EditText editText;
+    private ImageView display;
     private MyHandler mHandler;
     private final ServiceConnection usbConnection = new ServiceConnection() {
         @Override
@@ -71,34 +95,49 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+
+    /**
+     * Checks if the app has permission to write to device storage
+     *
+     * If the app does not has permission then the user will be prompted to grant permissions
+     *
+     * @param activity
+     */
+    public static void verifyStoragePermissions(Activity activity) {
+        // Check if we have write permission
+        int permission = ActivityCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
+
+        if (permission != PackageManager.PERMISSION_GRANTED) {
+            // We don't have permission so prompt the user
+            ActivityCompat.requestPermissions(
+                    activity,
+                    PERMISSIONS_STORAGE,
+                    REQUEST_EXTERNAL_STORAGE
+            );
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
         mHandler = new MyHandler(this);
+        display = (ImageView)findViewById(R.id.imageView);
 
-        display = (TextView) findViewById(R.id.textView1);
-        editText = (EditText) findViewById(R.id.editText1);
-        Button sendButton = (Button) findViewById(R.id.buttonSend);
+        Button sendButton = (Button) findViewById(R.id.btnSelectImage);
         sendButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (!editText.getText().toString().equals("")) {
-                    String data = editText.getText().toString();
 
-                    /*
-                    for(int x = 0; x < 64; x++){
-                        if (usbService != null) { // if UsbService was correctly binded, Send data
-                            usbService.write(exampleText.getBytes());
-                        }
-                    }
-                    */
+                verifyStoragePermissions(MainActivity.this);
 
-                    if (usbService != null) { // if UsbService was correctly binded, Send data
-                        usbService.write(data.getBytes());
-                    }
-                }
+                // open gallery select an jpeg image
+                Intent galleryIntent = new Intent(Intent.ACTION_PICK,
+                        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                // Start the Intent
+                startActivityForResult(galleryIntent, RESULT_SEND_FRAME_BUFFER);
+
             }
         });
     }
@@ -143,6 +182,142 @@ public class MainActivity extends AppCompatActivity {
         registerReceiver(mUsbReceiver, filter);
     }
 
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        final Bitmap bitmap;
+
+        if (requestCode == RESULT_SEND_FRAME_BUFFER && resultCode == Activity.RESULT_OK && data != null) {
+
+            String imgDecodableString;
+            StartPacket startPacket = new StartPacket();
+            StopPacket stopPacket = new StopPacket();
+
+            // Get the Image from data
+            Log.d(TAG, "Get the image data");
+            Uri selectedImage = data.getData();
+            String[] filePathColumn = {MediaStore.Images.Media.DATA};
+
+            // Get the cursor
+            Cursor cursor = MainActivity.this.getContentResolver().query(selectedImage,
+                    filePathColumn, null, null, null);
+
+            // Move to first row
+            cursor.moveToFirst();
+
+            int columnIndex = cursor.getColumnIndex(filePathColumn[0]);
+            imgDecodableString = cursor.getString(columnIndex);
+            int idxOfSlash = imgDecodableString.lastIndexOf('/');
+            int idxOfDot = imgDecodableString.lastIndexOf('.');
+            int nameLength = idxOfDot - idxOfSlash;
+            String filename = imgDecodableString.substring(idxOfSlash + 1);
+            String extName = imgDecodableString.substring(idxOfDot + 1);
+            cursor.close();
+
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = true;
+            //Returns null, sizes are in the options variable
+            bitmap = BitmapFactory.decodeFile(imgDecodableString, options);
+            boolean bFits = false;
+            int width = options.outWidth;
+            int height = options.outHeight;
+            if (width <= DisplayWidth && height <= DisplayHeight)
+                bFits = true;
+
+            // resize image
+
+            if (extName.toUpperCase().compareTo("JPG") == 0 && bFits) {
+                final File file = new File(imgDecodableString);
+                long len = file.length();
+                int calcCrc = (int)0x0;
+                int numPackets = (int)(len/512);
+                int remainder =(int) (len % 512);
+                if ( remainder > 0) {
+                    numPackets++;
+                }
+
+                long startTime = System.nanoTime();
+                calcCrc = STM32CRC.GenerateZipCrcFast(file);
+                startTime = System.nanoTime() - startTime;
+
+                Log.d(TAG, String.format("File ZIPCRC: %08X", calcCrc));
+                Log.d(TAG, String.format("ZIPCRC Calc time: %d ns", startTime));
+                startPacket.setCrcValue(calcCrc);
+                startPacket.setDataLength((int)file.length());
+                /* send start packet */
+
+                qUSBSenderLock.lock();
+                if (usbService != null) {
+                    usbService.write(startPacket.getBytes());
+                }
+
+                startTime = System.nanoTime();
+
+                /* send data */
+                int packet = 0;
+                try {
+                    final long fileLength = file.length();
+                    FileInputStream inputStream = new FileInputStream(file);
+                    byte filedata[] = new byte[512];
+                    FileChannel fileChannel = inputStream.getChannel();
+                    int filelen = (int) fileChannel.size();
+                    MappedByteBuffer buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, filelen);
+
+                    Log.d(TAG, "Sending data length " + fileLength);
+
+                    if (usbService != null) { // if UsbService was correctly binded, Send data
+
+                        while (buffer.hasRemaining()) {
+                            int remaining = filedata.length;
+                            if (buffer.remaining() < remaining)
+                                remaining = buffer.remaining();
+                            buffer.get(filedata, 0, remaining);
+                            packet++;
+                            // Log.d(TAG, "====>  " + packet + " <====");
+
+                            // calculate crc
+                            usbService.write(filedata);
+
+                        }
+
+                    }
+                } catch (Exception ioe) {
+                    Log.e(TAG, "Error sendHudPacket: " + ioe.getMessage());
+                }
+
+                /* send stop byte */
+                if (usbService != null) {
+                    usbService.write(stopPacket.getBytes());
+                }
+                qUSBSenderLock.unlock();
+
+                startTime = System.nanoTime() - startTime;
+                Log.d(TAG, String.format("Total Frame Transmit Time: %d", startTime));
+                Toast.makeText(MainActivity.this,String.format("Packets: 0x%02X", packet), Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this,String.format("Xfer Time: %d ms", startTime/1000/1000), Toast.LENGTH_SHORT).show();
+                MainActivity.this.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        display.setImageBitmap(bitmap);
+                    }
+                });
+            }else if(extName.toUpperCase().compareTo("BMP") == 0 && bFits){
+                Log.e(TAG, "BMP Image is not supported");
+                Toast.makeText(MainActivity.this, "BMP Image is not supported", Toast.LENGTH_LONG).show();
+
+            }
+            else{
+                // send error
+                Log.e(TAG, "Image is not a JPG or is larger than display");
+                Toast.makeText(MainActivity.this, "Invalid format for device", Toast.LENGTH_LONG).show();
+            }
+
+        }else{
+            Log.d(TAG, "Unknown Result or Cancelled");
+        }
+    }
+
+
     /*
      * This handler will be passed to UsbService. Data received from serial port is displayed through this handler
      */
@@ -158,7 +333,7 @@ public class MainActivity extends AppCompatActivity {
             switch (msg.what) {
                 case UsbService.MESSAGE_FROM_SERIAL_PORT:
                     String data = (String) msg.obj;
-                    mActivity.get().display.append(data);
+                    Log.d(TAG, "received data");
                     break;
                 case UsbService.CTS_CHANGE:
                     Toast.makeText(mActivity.get(), "CTS_CHANGE",Toast.LENGTH_LONG).show();
@@ -169,4 +344,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+
+
 }
