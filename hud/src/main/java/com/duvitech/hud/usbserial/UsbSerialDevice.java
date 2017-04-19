@@ -13,6 +13,7 @@ import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbEndpoint;
 import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbRequest;
+import android.util.Log;
 
 public abstract class UsbSerialDevice implements UsbSerialInterface
 {
@@ -301,8 +302,16 @@ public abstract class UsbSerialDevice implements UsbSerialInterface
         {
             while(working.get())
             {
+                int sent = 0;
                 byte[] data = serialBuffer.getWriteBuffer();
-                connection.bulkTransfer(outEndpoint, data, data.length, USB_TIMEOUT);
+                int len = data.length;
+                if(len>512){
+                    Log.d(CLASS_ID, "Greater than the STM32 can handle");
+                    sent = connection.bulkTransfer(outEndpoint, data, data.length, USB_TIMEOUT);
+                }else {
+                    sent = connection.bulkTransfer(outEndpoint, data, data.length, USB_TIMEOUT);
+
+                }
             }
         }
 
