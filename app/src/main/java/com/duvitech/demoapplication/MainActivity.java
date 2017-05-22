@@ -190,8 +190,6 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == RESULT_SEND_FRAME_BUFFER && resultCode == Activity.RESULT_OK && data != null) {
 
             String imgDecodableString;
-            StartPacket startPacket = new StartPacket();
-            StopPacket stopPacket = new StopPacket();
 
             // Get the Image from data
             Log.d(TAG, "Get the image data");
@@ -242,16 +240,11 @@ public class MainActivity extends AppCompatActivity {
 
                 Log.d(TAG, String.format("File ZIPCRC: %08X", calcCrc));
                 Log.d(TAG, String.format("ZIPCRC Calc time: %d ns", startTime));
-                startPacket.setCrcValue(calcCrc);
-                startPacket.setDataLength((int)file.length());
-                /* send start packet */
-
-                qUSBSenderLock.lock();
-                if (usbService != null) {
-                    usbService.write(startPacket.getBytes());
-                }
 
                 startTime = System.nanoTime();
+
+
+                qUSBSenderLock.lock();
 
                 /* send data */
                 int packet = 0;
@@ -285,9 +278,9 @@ public class MainActivity extends AppCompatActivity {
                     Log.e(TAG, "Error sendHudPacket: " + ioe.getMessage());
                 }
 
-                /* send stop byte */
+                /* send JPEG END data */
                 if (usbService != null) {
-                    usbService.write(stopPacket.getBytes());
+                    //usbService.write(stopPacket.getBytes());
                 }
                 qUSBSenderLock.unlock();
 
