@@ -32,6 +32,8 @@ import com.duvitech.hud.UsbService;
 import java.io.File;
 import java.io.FileInputStream;
 import java.lang.ref.WeakReference;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Set;
@@ -251,25 +253,61 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     final long fileLength = file.length();
                     FileInputStream inputStream = new FileInputStream(file);
-                    byte filedata[] = new byte[512];
+                    ByteBuffer temp;
                     FileChannel fileChannel = inputStream.getChannel();
                     int filelen = (int) fileChannel.size();
                     MappedByteBuffer buffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, filelen);
-
                     Log.d(TAG, "Sending data length " + fileLength);
 
                     if (usbService != null) { // if UsbService was correctly binded, Send data
 
+                        int gd = 500;
+                        int snd_len = 0;
+                        byte[] arr;
+
                         while (buffer.hasRemaining()) {
-                            int remaining = filedata.length;
-                            if (buffer.remaining() < remaining)
-                                remaining = buffer.remaining();
-                            buffer.get(filedata, 0, remaining);
-                            packet++;
+                            if(buffer.remaining()  == filelen) {
+                                if (buffer.remaining() > 500){
+                                    snd_len = 512;
+                                    gd = 500;
+                                }else{
+                                    gd =  buffer.remaining();
+                                    snd_len = gd + 12;
+                                }
+
+                                temp = ByteBuffer.allocate(snd_len);
+                                temp.put(0, (byte)0xCA);    /* start byte */
+                                temp.put(1, (byte)0xFF);    /* control flag */
+                                temp.order(ByteOrder.LITTLE_ENDIAN).putShort(2,(short)gd);
+                                temp.order(ByteOrder.LITTLE_ENDIAN).putInt(4,filelen);
+                                temp.order(ByteOrder.LITTLE_ENDIAN).putInt(8,calcCrc);
+                                temp.position(12);
+
+                            }else {
+                                if (buffer.remaining() > 512){
+                                    snd_len = 512;
+                                    gd = 512;
+                                }else{
+                                    gd =  buffer.remaining();
+                                    snd_len = gd;
+                                }
+
+                                temp = ByteBuffer.allocate(snd_len);
+                                temp.position(0);
+                            }
+
+                            arr = new byte[gd];
+                            buffer.get(arr, 0, gd);
+
+                            temp.put(arr);
                             // Log.d(TAG, "====>  " + packet + " <====");
 
                             // calculate crc
-                            usbService.write(filedata);
+                            usbService.write(temp.array());
+                            for(int x=0 ; x<5; x++){} // very slight delay
+                            packet++;
+                            temp.clear();
+                            temp = null;
 
                         }
 
