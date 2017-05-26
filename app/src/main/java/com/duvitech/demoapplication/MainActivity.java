@@ -44,9 +44,9 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     static String exampleText = "Lorem Ipsum is simply dummy text of the printing and typesettin";
-
-    private static final int DisplayWidth = 800;
-    private static final int DisplayHeight = 480;
+    static boolean flag = false;
+    private static final int DisplayWidth = 640;
+    private static final int DisplayHeight = 400;
     private final static Lock qUSBSenderLock = new ReentrantLock();
 
     private static final int RESULT_SEND_FRAME_BUFFER = 1;
@@ -303,8 +303,10 @@ public class MainActivity extends AppCompatActivity {
                             // Log.d(TAG, "====>  " + packet + " <====");
 
                             // calculate crc
+                            flag = false;
                             usbService.write(temp.array());
-                            for(int x=0 ; x<5; x++){} // very slight delay
+                            //for(int x=0 ; x<5; x++){} // very slight delay
+
                             packet++;
                             temp.clear();
                             temp = null;
@@ -364,7 +366,19 @@ public class MainActivity extends AppCompatActivity {
             switch (msg.what) {
                 case UsbService.MESSAGE_FROM_SERIAL_PORT:
                     String data = (String) msg.obj;
-                    Log.d(TAG, "received data");
+                    if(data.length() == 1){
+                        if(data.toCharArray()[0] == 0x00){
+                            /* success */
+                            flag = true;
+                        }else{
+                            /* error */
+                            Log.d(TAG, "received data");
+
+                        }
+                    }else if(data.length() > 1){
+                        Log.d(TAG, "received data " + data);
+                    }
+
                     break;
                 case UsbService.CTS_CHANGE:
                     Toast.makeText(mActivity.get(), "CTS_CHANGE",Toast.LENGTH_LONG).show();
